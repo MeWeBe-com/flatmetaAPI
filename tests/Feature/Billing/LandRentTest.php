@@ -164,4 +164,19 @@ class LandRentTest extends BillingTestCase
         $this->assertTrue($order->next_expiry > now()->addDays(30));
         $this->assertDatabaseHas('payments', ['kind' => 'rent', 'provider_ref' => 'SALE-1', 'amount' => 0.30]);
     }
+
+    public function test_claiming_taken_squares_detects_collision_and_rejects_order(): void
+    {
+        $owner = $this->user();
+        $this->landFor($owner, 3, 0); // claims squares at col 0, 1, 2
+
+        $buyer = $this->user();
+        // Buyer attempts to claim squares 1, 2, 3 (1 & 2 collide)
+        $squaresToClaim = array_merge([$this->squares(1, 1)[0], $this->squares(1, 2)[0], $this->squares(1, 3)[0]]);
+        $res = $this->actingAsUser($buyer)->postJson('/api/ClaimTiles', ['tiles' => $squaresToClaim]);
+
+        $res->assertJson(['status' => false]);
+        $this->assertStringContainsString('already claimed by another citizen', $res->json('data.message'));
+        $this->assertCount(2, $res->json('data.taken_tiles'));
+    }
 }

@@ -198,29 +198,60 @@ class OrdersController extends Controller
      * Returns the tiles (from $tiles) that are already taken by another order: an active one, or
      * (when $includePending) a pending checkout started in the last 24 hours.
      * Must be called inside a transaction; matching rows are locked.
+     *
+     * Performance optimization:
+     * Instead of running N separate queries (one per tile, e.g. 100 queries for 100 claimed squares)
+     * using unindexed `whereRaw('user_boxes.lat + 0 = ?')` expressions, we execute a single batch query
+     * filtering by numeric (lat_num, lng_num) which leverages the composite index
+     * `user_boxes_lat_lng_num_index`. This cuts N database roundtrips down to 1 (up to 100x fewer queries).
      */
     protected function findTakenTiles(array $tiles, ?int $exceptOrderId = null, bool $includePending = true): array
     {
-        $taken = [];
+        if (empty($tiles)) {
+            return [];
+        }
+
+        // Map candidate tiles by rounded coordinates key for fast O(1) in-memory lookup.
+        $candidates = [];
         foreach ($tiles as $tile) {
-            $query = UserBoxes::join('orders', 'orders.id', '=', 'user_boxes.order_id')
-                ->whereRaw('user_boxes.lat + 0 = ?', [(float) $tile['lat']])
-                ->whereRaw('user_boxes.lng + 0 = ?', [(float) $tile['lng']])
-                ->where(function ($q) use ($includePending) {
-                    $q->where('orders.status', '1');
-                    if ($includePending) {
-                        $q->orWhere(function ($q) {
-                            $q->where('orders.status', '0')->where('orders.created_at', '>=', now()->subDay());
-                        });
-                    }
-                });
-            if ($exceptOrderId) {
-                $query->where('orders.id', '!=', $exceptOrderId);
-            }
-            if ($query->lockForUpdate()->exists()) {
-                $taken[] = $tile;
+            $key = round((float) $tile['lat'], 7) . '|' . round((float) $tile['lng'], 7);
+            $candidates[$key] = $tile;
+        }
+
+        $query = UserBoxes::join('orders', 'orders.id', '=', 'user_boxes.order_id')
+            ->where(function ($q) use ($includePending) {
+                $q->where('orders.status', '1');
+                if ($includePending) {
+                    $q->orWhere(function ($q) {
+                        $q->where('orders.status', '0')->where('orders.created_at', '>=', now()->subDay());
+                    });
+                }
+            })
+            ->where(function ($coordsQuery) use ($candidates) {
+                foreach ($candidates as $tile) {
+                    $lat = round((float) $tile['lat'], 7);
+                    $lng = round((float) $tile['lng'], 7);
+                    $coordsQuery->orWhere(function ($sub) use ($lat, $lng) {
+                        $sub->where('user_boxes.lat_num', $lat)->where('user_boxes.lng_num', $lng);
+                    });
+                }
+            });
+
+        if ($exceptOrderId) {
+            $query->where('orders.id', '!=', $exceptOrderId);
+        }
+
+        $occupiedRows = $query->lockForUpdate()->get(['user_boxes.lat_num', 'user_boxes.lng_num']);
+
+        $taken = [];
+        foreach ($occupiedRows as $row) {
+            $key = round((float) $row->lat_num, 7) . '|' . round((float) $row->lng_num, 7);
+            if (isset($candidates[$key])) {
+                $taken[] = $candidates[$key];
+                unset($candidates[$key]); // avoid duplicate entries in result
             }
         }
+
         return $taken;
     }
 
