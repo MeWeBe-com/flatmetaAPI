@@ -27,7 +27,9 @@ class AddProfileAndSpanColumns extends Migration
             $table->text('previous_image')->nullable()->after('image');
             $table->text('span_bounds')->nullable()->after('previous_image');
         });
-        DB::statement('ALTER TABLE user_boxes MODIFY image TEXT NULL');
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement('ALTER TABLE user_boxes MODIFY image TEXT NULL');
+        }
 
         $path = storage_path('app/user_meta.json');
         if (file_exists($path)) {
@@ -54,6 +56,8 @@ class AddProfileAndSpanColumns extends Migration
         Schema::table('user_boxes', function (Blueprint $table) {
             $table->dropColumn(['previous_image', 'span_bounds']);
         });
-        DB::statement('ALTER TABLE user_boxes MODIFY image VARCHAR(255) NULL');
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement('ALTER TABLE user_boxes MODIFY image VARCHAR(255) NULL');
+        }
     }
 }

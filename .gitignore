@@ -15,3 +15,4 @@ yarn-error.log
 /.vscode
 /public/assets/uploads/users/fm_*
 /.phpunit.cache
+flatmeta_test
