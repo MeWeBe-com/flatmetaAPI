@@ -83,9 +83,15 @@ class UserFollowersController extends Controller
             $friendrequests = UserFollowers::where('follower_user_id', $myId)->get();
             $data = ['requests' => []];
 
-            if (!empty($friendrequests)) {
+            if ($friendrequests->isNotEmpty()) {
+                // Batch-load request senders to avoid N+1 queries in loop (reduces DB queries from N+1 to 2).
+                $senderIds = $friendrequests->pluck('user_id')->filter()->unique();
+                $sendersById = $senderIds->isNotEmpty()
+                    ? User::whereIn('id', $senderIds)->get()->keyBy('id')
+                    : collect();
+
                 foreach ($friendrequests as $friend) {
-                    $followerData = User::where('id', $friend->user_id)->first();
+                    $followerData = $sendersById->get($friend->user_id);
                     if ($followerData) {
                         $data['requests'][] = [
                             'request_id' => $friend->id,
@@ -117,10 +123,19 @@ class UserFollowersController extends Controller
             })
             ->get();
 
+        // Batch-load active friends to avoid N+1 queries in loop (reduces DB queries from N+1 to 2).
+        $friendIds = $rows->map(function ($row) use ($myId) {
+            return (int) $row->user_id === $myId ? (int) $row->follower_user_id : (int) $row->user_id;
+        })->unique()->filter();
+
+        $usersById = $friendIds->isNotEmpty()
+            ? User::whereIn('id', $friendIds)->where('status', '!=', '3')->get()->keyBy('id')
+            : collect();
+
         $friends = [];
         foreach ($rows as $row) {
             $otherId = (int) $row->user_id === $myId ? (int) $row->follower_user_id : (int) $row->user_id;
-            $other = User::where('id', $otherId)->where('status', '!=', '3')->first();
+            $other = $usersById->get($otherId);
             if ($other) {
                 $friends[] = [
                     'user_id' => $other->id,
