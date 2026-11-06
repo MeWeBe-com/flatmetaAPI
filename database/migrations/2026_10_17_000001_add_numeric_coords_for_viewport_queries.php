@@ -28,8 +28,10 @@ class AddNumericCoordsForViewportQueries extends Migration
             $table->index(['status', 'center_lat', 'center_lng'], 'orders_status_center_index');
         });
 
-        DB::statement("UPDATE user_boxes SET lat_num = CAST(lat AS DECIMAL(10,7)), lng_num = CAST(lng AS DECIMAL(10,7)) WHERE lat REGEXP '^-?[0-9.]+$' AND lng REGEXP '^-?[0-9.]+$'");
-        DB::statement('UPDATE orders o JOIN (SELECT order_id, AVG(lat_num) AS clat, AVG(lng_num) AS clng FROM user_boxes GROUP BY order_id) b ON b.order_id = o.id SET o.center_lat = b.clat, o.center_lng = b.clng');
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("UPDATE user_boxes SET lat_num = CAST(lat AS DECIMAL(10,7)), lng_num = CAST(lng AS DECIMAL(10,7)) WHERE lat REGEXP '^-?[0-9.]+$' AND lng REGEXP '^-?[0-9.]+$'");
+            DB::statement('UPDATE orders o JOIN (SELECT order_id, AVG(lat_num) AS clat, AVG(lng_num) AS clng FROM user_boxes GROUP BY order_id) b ON b.order_id = o.id SET o.center_lat = b.clat, o.center_lng = b.clng');
+        }
     }
 
     public function down()
